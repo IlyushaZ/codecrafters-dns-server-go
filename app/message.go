@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
@@ -62,6 +63,15 @@ func (h *Header) SetQR(val bool) {
 	}
 }
 
+// SetRC sets RC flag depending on whether OPCODE is 0
+// TODO: move this logic somewhere else
+func (h *Header) SetRC() {
+	opcode := (h.Flags & 0x7800) >> 11
+	if opcode != 0 {
+		h.Flags |= 4
+	}
+}
+
 func (m *Message) Encode() ([]byte, error) {
 	buf := &bytes.Buffer{}
 
@@ -114,4 +124,21 @@ func (m *Message) Encode() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+func DecodeMessage(packet []byte) (Message, error) {
+	h := Header{}
+
+	if len(packet) < 12 {
+		return Message{}, errors.New("malformed packet")
+	}
+
+	h.ID = binary.BigEndian.Uint16(packet[:2])
+	h.Flags = binary.BigEndian.Uint16(packet[2:4])
+	h.QDCount = binary.BigEndian.Uint16(packet[4:6])
+	h.ANCount = binary.BigEndian.Uint16(packet[6:8])
+	h.NSCount = binary.BigEndian.Uint16(packet[8:10])
+	h.ARCount = binary.BigEndian.Uint16(packet[10:12])
+
+	return Message{Header: h}, nil
 }

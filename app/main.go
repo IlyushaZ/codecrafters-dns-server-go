@@ -31,14 +31,20 @@ func main() {
 			break
 		}
 
+		req, err := DecodeMessage(buf)
+		if err != nil {
+			fmt.Printf("Error decoding packet: %v\n", err)
+		}
+
 		receivedData := string(buf[:size])
 		fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
 
-		msg := Message{
+		resp := Message{
 			Header: Header{
-				ID:      1234, // TODO: set this value as ID from request
+				ID:      req.Header.ID,
 				QDCount: 1,
 				ANCount: 1,
+				Flags:   req.Header.Flags,
 			},
 			Question: Question{
 				Name: []Label{
@@ -60,14 +66,15 @@ func main() {
 				Data:       3221225000, // example ip address
 			},
 		}
-		msg.Header.SetQR(true)
+		resp.Header.SetQR(true)
+		resp.Header.SetRC()
 
-		resp, err := msg.Encode()
+		encoded, err := resp.Encode()
 		if err != nil {
 			fmt.Println("Failed to encode response: ", err)
 		}
 
-		_, err = udpConn.WriteToUDP(resp, source)
+		_, err = udpConn.WriteToUDP(encoded, source)
 		if err != nil {
 			fmt.Println("Failed to send response:", err)
 		}
