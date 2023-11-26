@@ -6,6 +6,8 @@ import (
 	"fmt"
 )
 
+const IPv4Len = 4
+
 type Header struct {
 	ID uint16
 	// Flags contains multiple values:
@@ -28,20 +30,30 @@ type Header struct {
 	ARCount uint16
 }
 
+type Label struct {
+	Len     byte
+	Content []byte
+}
+
 type Question struct {
 	Name         []Label
 	QuestionType uint16
 	Class        uint16
 }
 
-type Label struct {
-	Len     byte
-	Content []byte
+type Answer struct {
+	Name       []Label
+	RecordType uint16
+	Class      uint16
+	TTL        uint32
+	Length     uint16
+	Data       uint32 // ATM we only support class "A" record type which means that data will only contain IPv4
 }
 
 type Message struct {
 	Header   Header
 	Question Question
+	Answer   Answer
 }
 
 func (h *Header) SetQR(val bool) {
@@ -59,22 +71,46 @@ func (m *Message) Encode() ([]byte, error) {
 
 	for _, l := range m.Question.Name {
 		if err := buf.WriteByte(l.Len); err != nil {
-			return nil, fmt.Errorf("can't write label's len: %w", err)
+			return nil, fmt.Errorf("can't write label's len in question: %w", err)
 		}
 		if _, err := buf.Write(l.Content); err != nil {
-			return nil, fmt.Errorf("can't write label's content: %w", err)
+			return nil, fmt.Errorf("can't write label's content in question: %w", err)
 		}
 	}
 	if err := buf.WriteByte('\x00'); err != nil {
-		return nil, fmt.Errorf("can't write terminating byte of name: %w", err)
+		return nil, fmt.Errorf("can't write terminating byte of name in question: %w", err)
 	}
 
-	typeAndClass := make([]byte, 0, 32)
+	typeAndClass := make([]byte, 0, 4)
 	typeAndClass = binary.BigEndian.AppendUint16(typeAndClass, m.Question.QuestionType)
 	typeAndClass = binary.BigEndian.AppendUint16(typeAndClass, m.Question.Class)
 
 	if _, err := buf.Write(typeAndClass); err != nil {
 		return nil, fmt.Errorf("can't write type and class: %w", err)
+	}
+
+	for _, l := range m.Answer.Name {
+		if err := buf.WriteByte(l.Len); err != nil {
+			return nil, fmt.Errorf("can't write label's len in answer: %w", err)
+		}
+		if _, err := buf.Write(l.Content); err != nil {
+			return nil, fmt.Errorf("can't write label's content in answer: %w", err)
+		}
+	}
+	if err := buf.WriteByte('\x00'); err != nil {
+		return nil, fmt.Errorf("can't write terminating byte of name in answer: %w", err)
+	}
+
+	// restAnswer is the remaining part of answer, excluding name
+	restAnswer := make([]byte, 0, 14)
+	restAnswer = binary.BigEndian.AppendUint16(restAnswer, m.Answer.RecordType)
+	restAnswer = binary.BigEndian.AppendUint16(restAnswer, m.Answer.Class)
+	restAnswer = binary.BigEndian.AppendUint32(restAnswer, m.Answer.TTL)
+	restAnswer = binary.BigEndian.AppendUint16(restAnswer, m.Answer.Length)
+	restAnswer = binary.BigEndian.AppendUint32(restAnswer, m.Answer.Data)
+
+	if _, err := buf.Write(restAnswer); err != nil {
+		return nil, fmt.Errorf("can't write answer: %w", err)
 	}
 
 	return buf.Bytes(), nil

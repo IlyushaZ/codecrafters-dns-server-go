@@ -38,6 +38,7 @@ func main() {
 			Header: Header{
 				ID:      1234, // TODO: set this value as ID from request
 				QDCount: 1,
+				ANCount: 1,
 			},
 			Question: Question{
 				Name: []Label{
@@ -46,6 +47,17 @@ func main() {
 				},
 				QuestionType: 1,
 				Class:        1,
+			},
+			Answer: Answer{
+				Name: []Label{
+					{Len: 12, Content: []byte("codecrafters")},
+					{Len: 2, Content: []byte("io")},
+				},
+				RecordType: 1,
+				Class:      1,
+				TTL:        60,
+				Length:     IPv4Len,
+				Data:       3221225000, // example ip address
 			},
 		}
 		msg.Header.SetQR(true)
