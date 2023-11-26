@@ -34,10 +34,19 @@ func main() {
 		receivedData := string(buf[:size])
 		fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
 
-		// Create an empty response
-		response := []byte{}
+		msg := Message{
+			Header: Header{
+				ID: 1234, // TODO: set this value as ID from request
+			},
+		}
+		msg.Header.SetQR(true)
 
-		_, err = udpConn.WriteToUDP(response, source)
+		resp, err := msg.Encode()
+		if err != nil {
+			fmt.Println("Failed to encode response: ", err)
+		}
+
+		_, err = udpConn.WriteToUDP(resp, source)
 		if err != nil {
 			fmt.Println("Failed to send response:", err)
 		}
