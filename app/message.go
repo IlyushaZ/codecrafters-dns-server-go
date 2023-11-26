@@ -28,8 +28,20 @@ type Header struct {
 	ARCount uint16
 }
 
+type Question struct {
+	Name         []Label
+	QuestionType uint16
+	Class        uint16
+}
+
+type Label struct {
+	Len     byte
+	Content []byte
+}
+
 type Message struct {
-	Header Header
+	Header   Header
+	Question Question
 }
 
 func (h *Header) SetQR(val bool) {
@@ -41,8 +53,28 @@ func (h *Header) SetQR(val bool) {
 func (m *Message) Encode() ([]byte, error) {
 	buf := &bytes.Buffer{}
 
-	if err := binary.Write(buf, binary.BigEndian, m); err != nil {
-		return nil, fmt.Errorf("can't write to buffer: %w", err)
+	if err := binary.Write(buf, binary.BigEndian, m.Header); err != nil {
+		return nil, fmt.Errorf("can't write header: %w", err)
+	}
+
+	for _, l := range m.Question.Name {
+		if err := buf.WriteByte(l.Len); err != nil {
+			return nil, fmt.Errorf("can't write label's len: %w", err)
+		}
+		if _, err := buf.Write(l.Content); err != nil {
+			return nil, fmt.Errorf("can't write label's content: %w", err)
+		}
+	}
+	if err := buf.WriteByte('\x00'); err != nil {
+		return nil, fmt.Errorf("can't write terminating byte of name: %w", err)
+	}
+
+	typeAndClass := make([]byte, 0, 32)
+	typeAndClass = binary.BigEndian.AppendUint16(typeAndClass, m.Question.QuestionType)
+	typeAndClass = binary.BigEndian.AppendUint16(typeAndClass, m.Question.Class)
+
+	if _, err := buf.Write(typeAndClass); err != nil {
+		return nil, fmt.Errorf("can't write type and class: %w", err)
 	}
 
 	return buf.Bytes(), nil

@@ -36,7 +36,16 @@ func main() {
 
 		msg := Message{
 			Header: Header{
-				ID: 1234, // TODO: set this value as ID from request
+				ID:      1234, // TODO: set this value as ID from request
+				QDCount: 1,
+			},
+			Question: Question{
+				Name: []Label{
+					{Len: 12, Content: []byte("codecrafters")},
+					{Len: 2, Content: []byte("io")},
+				},
+				QuestionType: 1,
+				Class:        1,
 			},
 		}
 		msg.Header.SetQR(true)
