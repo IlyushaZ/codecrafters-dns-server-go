@@ -67,7 +67,9 @@ func main() {
 			},
 		}
 		resp.Header.SetQR(true)
-		resp.Header.SetRC()
+		if req.Header.OpCode() != 0 {
+			resp.Header.SetRC(4)
+		}
 
 		encoded, err := resp.Encode()
 		if err != nil {

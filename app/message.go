@@ -63,13 +63,12 @@ func (h *Header) SetQR(val bool) {
 	}
 }
 
-// SetRC sets RC flag depending on whether OPCODE is 0
-// TODO: move this logic somewhere else
-func (h *Header) SetRC() {
-	opcode := (h.Flags & 0x7800) >> 11
-	if opcode != 0 {
-		h.Flags |= 4
-	}
+func (h *Header) SetRC(val uint16) {
+	h.Flags |= val
+}
+
+func (h *Header) OpCode() uint16 {
+	return (h.Flags & 0x7800) >> 11
 }
 
 func (m *Message) Encode() ([]byte, error) {
