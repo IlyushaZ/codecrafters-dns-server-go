@@ -156,8 +156,37 @@ func DecodeMessage(packet []byte) (Message, error) {
 				return Message{}, fmt.Errorf("can't read label's len: %w", err)
 			}
 
-			if labelLen == '\x00' {
+			if labelLen == 0 {
 				break NameLoop
+			}
+
+			if labelLen&192 == 192 { // this is pointer
+				remainingOctet, err := buf.ReadByte()
+				if err != nil {
+					return Message{}, fmt.Errorf("can't read remaining octet of the pointer: %w", err)
+				}
+
+				offset := uint16(labelLen&63)<<8 + uint16(remainingOctet)
+
+				offsetBuf := bytes.NewBuffer(packet[offset:])
+				labelLen, err = offsetBuf.ReadByte()
+				if err != nil {
+					return Message{}, fmt.Errorf("can't read label's len by offset: %w", err)
+				}
+
+				labelContent := make([]byte, labelLen)
+				if read, err := offsetBuf.Read(labelContent); err != nil {
+					return Message{}, fmt.Errorf("can't read label's content by offset: %w", err)
+				} else if read != int(labelLen) {
+					return Message{}, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
+				}
+
+				q.Name = append(q.Name, Label{
+					Len:     labelLen,
+					Content: labelContent,
+				})
+
+				continue NameLoop
 			}
 
 			labelContent := make([]byte, labelLen)
@@ -175,7 +204,7 @@ func DecodeMessage(packet []byte) (Message, error) {
 			})
 		}
 
-		restQuestion := make([]byte, 4)
+		restQuestion := make([]byte, 4) // question type and class
 		read, err := buf.Read(restQuestion)
 		if err != nil {
 			return Message{}, fmt.Errorf("can't read question's type and class: %w", err)
