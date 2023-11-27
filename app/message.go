@@ -139,5 +139,45 @@ func DecodeMessage(packet []byte) (Message, error) {
 	h.NSCount = binary.BigEndian.Uint16(packet[8:10])
 	h.ARCount = binary.BigEndian.Uint16(packet[10:12])
 
-	return Message{Header: h}, nil
+	buf := bytes.NewBuffer(packet[12:])
+	q := Question{}
+
+	for {
+		labelLen, err := buf.ReadByte()
+		if err != nil {
+			return Message{}, fmt.Errorf("can't read label's len: %w", err)
+		}
+
+		if labelLen == '\x00' {
+			break
+		}
+
+		labelContent := make([]byte, labelLen)
+		read, err := buf.Read(labelContent)
+		if err != nil {
+			return Message{}, fmt.Errorf("can't read label's content: %w", err)
+		}
+		if read != int(labelLen) {
+			return Message{}, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
+		}
+
+		q.Name = append(q.Name, Label{
+			Len:     labelLen,
+			Content: labelContent,
+		})
+	}
+
+	restQuestion := make([]byte, 4)
+	read, err := buf.Read(restQuestion)
+	if err != nil {
+		return Message{}, fmt.Errorf("can't read question's type and class: %w", err)
+	}
+	if read != 4 {
+		return Message{}, errors.New("malformed question")
+	}
+
+	q.QuestionType = binary.BigEndian.Uint16(restQuestion[:2])
+	q.Class = binary.BigEndian.Uint16(restQuestion[2:])
+
+	return Message{Header: h, Question: q}, nil
 }

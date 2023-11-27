@@ -47,18 +47,12 @@ func main() {
 				Flags:   req.Header.Flags,
 			},
 			Question: Question{
-				Name: []Label{
-					{Len: 12, Content: []byte("codecrafters")},
-					{Len: 2, Content: []byte("io")},
-				},
-				QuestionType: 1,
-				Class:        1,
+				Name:         req.Question.Name,
+				QuestionType: req.Question.QuestionType,
+				Class:        req.Question.Class,
 			},
 			Answer: Answer{
-				Name: []Label{
-					{Len: 12, Content: []byte("codecrafters")},
-					{Len: 2, Content: []byte("io")},
-				},
+				Name:       req.Question.Name,
 				RecordType: 1,
 				Class:      1,
 				TTL:        60,
