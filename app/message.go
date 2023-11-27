@@ -52,9 +52,9 @@ type Answer struct {
 }
 
 type Message struct {
-	Header   Header
-	Question Question
-	Answer   Answer
+	Header    Header
+	Questions []Question
+	Answers   []Answer
 }
 
 func (h *Header) SetQR(val bool) {
@@ -78,48 +78,52 @@ func (m *Message) Encode() ([]byte, error) {
 		return nil, fmt.Errorf("can't write header: %w", err)
 	}
 
-	for _, l := range m.Question.Name {
-		if err := buf.WriteByte(l.Len); err != nil {
-			return nil, fmt.Errorf("can't write label's len in question: %w", err)
+	for _, q := range m.Questions {
+		for _, l := range q.Name {
+			if err := buf.WriteByte(l.Len); err != nil {
+				return nil, fmt.Errorf("can't write label's len in question: %w", err)
+			}
+			if _, err := buf.Write(l.Content); err != nil {
+				return nil, fmt.Errorf("can't write label's content in question: %w", err)
+			}
 		}
-		if _, err := buf.Write(l.Content); err != nil {
-			return nil, fmt.Errorf("can't write label's content in question: %w", err)
+		if err := buf.WriteByte('\x00'); err != nil {
+			return nil, fmt.Errorf("can't write terminating byte of name in question: %w", err)
 		}
-	}
-	if err := buf.WriteByte('\x00'); err != nil {
-		return nil, fmt.Errorf("can't write terminating byte of name in question: %w", err)
-	}
 
-	typeAndClass := make([]byte, 0, 4)
-	typeAndClass = binary.BigEndian.AppendUint16(typeAndClass, m.Question.QuestionType)
-	typeAndClass = binary.BigEndian.AppendUint16(typeAndClass, m.Question.Class)
+		typeAndClass := make([]byte, 0, 4)
+		typeAndClass = binary.BigEndian.AppendUint16(typeAndClass, q.QuestionType)
+		typeAndClass = binary.BigEndian.AppendUint16(typeAndClass, q.Class)
 
-	if _, err := buf.Write(typeAndClass); err != nil {
-		return nil, fmt.Errorf("can't write type and class: %w", err)
-	}
-
-	for _, l := range m.Answer.Name {
-		if err := buf.WriteByte(l.Len); err != nil {
-			return nil, fmt.Errorf("can't write label's len in answer: %w", err)
-		}
-		if _, err := buf.Write(l.Content); err != nil {
-			return nil, fmt.Errorf("can't write label's content in answer: %w", err)
+		if _, err := buf.Write(typeAndClass); err != nil {
+			return nil, fmt.Errorf("can't write type and class: %w", err)
 		}
 	}
-	if err := buf.WriteByte('\x00'); err != nil {
-		return nil, fmt.Errorf("can't write terminating byte of name in answer: %w", err)
-	}
 
-	// restAnswer is the remaining part of answer, excluding name
-	restAnswer := make([]byte, 0, 14)
-	restAnswer = binary.BigEndian.AppendUint16(restAnswer, m.Answer.RecordType)
-	restAnswer = binary.BigEndian.AppendUint16(restAnswer, m.Answer.Class)
-	restAnswer = binary.BigEndian.AppendUint32(restAnswer, m.Answer.TTL)
-	restAnswer = binary.BigEndian.AppendUint16(restAnswer, m.Answer.Length)
-	restAnswer = binary.BigEndian.AppendUint32(restAnswer, m.Answer.Data)
+	for _, a := range m.Answers {
+		for _, l := range a.Name {
+			if err := buf.WriteByte(l.Len); err != nil {
+				return nil, fmt.Errorf("can't write label's len in answer: %w", err)
+			}
+			if _, err := buf.Write(l.Content); err != nil {
+				return nil, fmt.Errorf("can't write label's content in answer: %w", err)
+			}
+		}
+		if err := buf.WriteByte('\x00'); err != nil {
+			return nil, fmt.Errorf("can't write terminating byte of name in answer: %w", err)
+		}
 
-	if _, err := buf.Write(restAnswer); err != nil {
-		return nil, fmt.Errorf("can't write answer: %w", err)
+		// restAnswer is the remaining part of answer, excluding name
+		restAnswer := make([]byte, 0, 14)
+		restAnswer = binary.BigEndian.AppendUint16(restAnswer, a.RecordType)
+		restAnswer = binary.BigEndian.AppendUint16(restAnswer, a.Class)
+		restAnswer = binary.BigEndian.AppendUint32(restAnswer, a.TTL)
+		restAnswer = binary.BigEndian.AppendUint16(restAnswer, a.Length)
+		restAnswer = binary.BigEndian.AppendUint32(restAnswer, a.Data)
+
+		if _, err := buf.Write(restAnswer); err != nil {
+			return nil, fmt.Errorf("can't write answer: %w", err)
+		}
 	}
 
 	return buf.Bytes(), nil
@@ -140,44 +144,51 @@ func DecodeMessage(packet []byte) (Message, error) {
 	h.ARCount = binary.BigEndian.Uint16(packet[10:12])
 
 	buf := bytes.NewBuffer(packet[12:])
-	q := Question{}
+	qs := make([]Question, 0, h.QDCount)
 
-	for {
-		labelLen, err := buf.ReadByte()
+	for i := 0; i < int(h.QDCount); i++ {
+		q := Question{}
+
+	NameLoop:
+		for {
+			labelLen, err := buf.ReadByte()
+			if err != nil {
+				return Message{}, fmt.Errorf("can't read label's len: %w", err)
+			}
+
+			if labelLen == '\x00' {
+				break NameLoop
+			}
+
+			labelContent := make([]byte, labelLen)
+			read, err := buf.Read(labelContent)
+			if err != nil {
+				return Message{}, fmt.Errorf("can't read label's content: %w", err)
+			}
+			if read != int(labelLen) {
+				return Message{}, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
+			}
+
+			q.Name = append(q.Name, Label{
+				Len:     labelLen,
+				Content: labelContent,
+			})
+		}
+
+		restQuestion := make([]byte, 4)
+		read, err := buf.Read(restQuestion)
 		if err != nil {
-			return Message{}, fmt.Errorf("can't read label's len: %w", err)
+			return Message{}, fmt.Errorf("can't read question's type and class: %w", err)
+		}
+		if read != 4 {
+			return Message{}, errors.New("malformed question")
 		}
 
-		if labelLen == '\x00' {
-			break
-		}
+		q.QuestionType = binary.BigEndian.Uint16(restQuestion[:2])
+		q.Class = binary.BigEndian.Uint16(restQuestion[2:])
 
-		labelContent := make([]byte, labelLen)
-		read, err := buf.Read(labelContent)
-		if err != nil {
-			return Message{}, fmt.Errorf("can't read label's content: %w", err)
-		}
-		if read != int(labelLen) {
-			return Message{}, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
-		}
-
-		q.Name = append(q.Name, Label{
-			Len:     labelLen,
-			Content: labelContent,
-		})
+		qs = append(qs, q)
 	}
 
-	restQuestion := make([]byte, 4)
-	read, err := buf.Read(restQuestion)
-	if err != nil {
-		return Message{}, fmt.Errorf("can't read question's type and class: %w", err)
-	}
-	if read != 4 {
-		return Message{}, errors.New("malformed question")
-	}
-
-	q.QuestionType = binary.BigEndian.Uint16(restQuestion[:2])
-	q.Class = binary.BigEndian.Uint16(restQuestion[2:])
-
-	return Message{Header: h, Question: q}, nil
+	return Message{Header: h, Questions: qs}, nil
 }

@@ -42,23 +42,28 @@ func main() {
 		resp := Message{
 			Header: Header{
 				ID:      req.Header.ID,
-				QDCount: 1,
-				ANCount: 1,
+				QDCount: req.Header.QDCount,
+				ANCount: req.Header.QDCount, // TODO: add actual answer count when logics is implemented
 				Flags:   req.Header.Flags,
 			},
-			Question: Question{
-				Name:         req.Question.Name,
-				QuestionType: req.Question.QuestionType,
-				Class:        req.Question.Class,
-			},
-			Answer: Answer{
-				Name:       req.Question.Name,
+			Questions: make([]Question, 0, len(req.Questions)),
+			Answers:   make([]Answer, 0, len(req.Questions)),
+		}
+		for _, q := range req.Questions {
+			resp.Questions = append(resp.Questions, Question{
+				Name:         q.Name,
+				QuestionType: q.QuestionType,
+				Class:        q.Class,
+			})
+
+			resp.Answers = append(resp.Answers, Answer{
+				Name:       q.Name,
 				RecordType: 1,
 				Class:      1,
 				TTL:        60,
 				Length:     IPv4Len,
-				Data:       3221225000, // example ip address
-			},
+				Data:       3221225000, // example ip addr
+			})
 		}
 		resp.Header.SetQR(true)
 		if req.Header.OpCode() != 0 {
