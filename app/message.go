@@ -31,19 +31,15 @@ type Header struct {
 	ARCount uint16
 }
 
-type Label struct {
-	Len     byte
-	Content []byte
-}
-
 type Question struct {
-	Name         []Label
+	// Name represents list of labels
+	Name         []string
 	QuestionType uint16
 	Class        uint16
 }
 
 type Answer struct {
-	Name       []Label
+	Name       []string
 	RecordType uint16
 	Class      uint16
 	TTL        uint32
@@ -80,10 +76,10 @@ func (m *Message) Encode() ([]byte, error) {
 
 	for _, q := range m.Questions {
 		for _, l := range q.Name {
-			if err := buf.WriteByte(l.Len); err != nil {
+			if err := buf.WriteByte(byte(len(l))); err != nil {
 				return nil, fmt.Errorf("can't write label's len in question: %w", err)
 			}
-			if _, err := buf.Write(l.Content); err != nil {
+			if _, err := buf.WriteString(l); err != nil {
 				return nil, fmt.Errorf("can't write label's content in question: %w", err)
 			}
 		}
@@ -102,10 +98,10 @@ func (m *Message) Encode() ([]byte, error) {
 
 	for _, a := range m.Answers {
 		for _, l := range a.Name {
-			if err := buf.WriteByte(l.Len); err != nil {
+			if err := buf.WriteByte(byte(len(l))); err != nil {
 				return nil, fmt.Errorf("can't write label's len in answer: %w", err)
 			}
-			if _, err := buf.Write(l.Content); err != nil {
+			if _, err := buf.WriteString(l); err != nil {
 				return nil, fmt.Errorf("can't write label's content in answer: %w", err)
 			}
 		}
@@ -149,60 +145,11 @@ func DecodeMessage(packet []byte) (Message, error) {
 	for i := 0; i < int(h.QDCount); i++ {
 		q := Question{}
 
-	NameLoop:
-		for {
-			labelLen, err := buf.ReadByte()
-			if err != nil {
-				return Message{}, fmt.Errorf("can't read label's len: %w", err)
-			}
-
-			if labelLen == 0 {
-				break NameLoop
-			}
-
-			if labelLen&192 == 192 { // this is pointer
-				remainingOctet, err := buf.ReadByte()
-				if err != nil {
-					return Message{}, fmt.Errorf("can't read remaining octet of the pointer: %w", err)
-				}
-
-				offset := uint16(labelLen&63)<<8 + uint16(remainingOctet)
-
-				offsetBuf := bytes.NewBuffer(packet[offset:])
-				labelLen, err = offsetBuf.ReadByte()
-				if err != nil {
-					return Message{}, fmt.Errorf("can't read label's len by offset: %w", err)
-				}
-
-				labelContent := make([]byte, labelLen)
-				if read, err := offsetBuf.Read(labelContent); err != nil {
-					return Message{}, fmt.Errorf("can't read label's content by offset: %w", err)
-				} else if read != int(labelLen) {
-					return Message{}, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
-				}
-
-				q.Name = append(q.Name, Label{
-					Len:     labelLen,
-					Content: labelContent,
-				})
-
-				continue NameLoop
-			}
-
-			labelContent := make([]byte, labelLen)
-			read, err := buf.Read(labelContent)
-			if err != nil {
-				return Message{}, fmt.Errorf("can't read label's content: %w", err)
-			}
-			if read != int(labelLen) {
-				return Message{}, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
-			}
-
-			q.Name = append(q.Name, Label{
-				Len:     labelLen,
-				Content: labelContent,
-			})
+		labels, err := decodeLabels(buf, packet)
+		if err != nil {
+			return Message{}, fmt.Errorf("can't decode labels: %w", err)
 		}
+		q.Name = labels
 
 		restQuestion := make([]byte, 4) // question type and class
 		read, err := buf.Read(restQuestion)
@@ -219,5 +166,95 @@ func DecodeMessage(packet []byte) (Message, error) {
 		qs = append(qs, q)
 	}
 
-	return Message{Header: h, Questions: qs}, nil
+	as := make([]Answer, 0, h.ANCount)
+	for i := 0; i < int(h.ANCount); i++ {
+		a := Answer{}
+
+		labels, err := decodeLabels(buf, packet)
+		if err != nil {
+			return Message{}, fmt.Errorf("can't decode labels: %w", err)
+		}
+		a.Name = labels
+
+		restAnswer := make([]byte, 14)
+		read, err := buf.Read(restAnswer)
+		if err != nil {
+			return Message{}, fmt.Errorf("can't read rest answer: %w", err)
+		}
+		if read != 14 {
+			return Message{}, errors.New("malformed answer")
+		}
+
+		a.RecordType = binary.BigEndian.Uint16(restAnswer[:2])
+		a.Class = binary.BigEndian.Uint16(restAnswer[2:4])
+		a.TTL = binary.BigEndian.Uint32(restAnswer[4:8])
+		a.Length = binary.BigEndian.Uint16(restAnswer[8:10])
+		a.Data = binary.BigEndian.Uint32(restAnswer[10:14])
+
+		as = append(as, a)
+	}
+
+	return Message{
+		Header:    h,
+		Questions: qs,
+		Answers:   as,
+	}, nil
+}
+
+func decodeLabels(buf *bytes.Buffer, packet []byte) ([]string, error) {
+	result := []string{}
+
+	for {
+		labelLen, err := buf.ReadByte()
+		if err != nil {
+			return nil, fmt.Errorf("can't read label's len: %w", err)
+		}
+
+		if labelLen == 0 {
+			break
+		}
+
+		if labelLen&192 == 192 { // this is pointer
+			remainingOctet, err := buf.ReadByte()
+			if err != nil {
+				return nil, fmt.Errorf("can't read remaining octet of the pointer: %w", err)
+			}
+
+			offset := uint16(labelLen&63)<<8 + uint16(remainingOctet)
+
+			offsetBuf := bytes.NewBuffer(packet[offset:])
+			labelLen, err = offsetBuf.ReadByte()
+			if err != nil {
+				return nil, fmt.Errorf("can't read label's len by offset: %w", err)
+			}
+
+			if labelLen == 0 {
+				break
+			}
+
+			labelContent := make([]byte, labelLen)
+			if read, err := offsetBuf.Read(labelContent); err != nil {
+				return nil, fmt.Errorf("can't read label's content by offset: %w", err)
+			} else if read != int(labelLen) {
+				return nil, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
+			}
+
+			result = append(result, string(labelContent))
+
+			continue
+		}
+
+		labelContent := make([]byte, labelLen)
+		read, err := buf.Read(labelContent)
+		if err != nil {
+			return nil, fmt.Errorf("can't read label's content: %w", err)
+		}
+		if read != int(labelLen) {
+			return nil, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
+		}
+
+		result = append(result, string(labelContent))
+	}
+
+	return result, nil
 }
