@@ -221,27 +221,28 @@ func decodeLabels(buf *bytes.Buffer, packet []byte) ([]string, error) {
 			}
 
 			offset := uint16(labelLen&63)<<8 + uint16(remainingOctet)
-
 			offsetBuf := bytes.NewBuffer(packet[offset:])
-			labelLen, err = offsetBuf.ReadByte()
-			if err != nil {
-				return nil, fmt.Errorf("can't read label's len by offset: %w", err)
+
+			for {
+				labelLen, err = offsetBuf.ReadByte()
+				if err != nil {
+					return nil, fmt.Errorf("can't read label's len by offset: %w", err)
+				}
+
+				if labelLen == 0 {
+					break
+				}
+
+				labelContent := make([]byte, labelLen)
+				if read, err := offsetBuf.Read(labelContent); err != nil {
+					return nil, fmt.Errorf("can't read label's content by offset: %w", err)
+				} else if read != int(labelLen) {
+					return nil, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
+				}
+				result = append(result, string(labelContent))
 			}
 
-			if labelLen == 0 {
-				break
-			}
-
-			labelContent := make([]byte, labelLen)
-			if read, err := offsetBuf.Read(labelContent); err != nil {
-				return nil, fmt.Errorf("can't read label's content by offset: %w", err)
-			} else if read != int(labelLen) {
-				return nil, fmt.Errorf("malformed label. expected len to be %d, got %d", labelLen, read)
-			}
-
-			result = append(result, string(labelContent))
-
-			continue
+			break
 		}
 
 		labelContent := make([]byte, labelLen)

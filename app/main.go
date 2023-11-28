@@ -120,13 +120,9 @@ func main() {
 			return
 		}
 
-		fmt.Println("payload: ", encoded)
-
 		_, err = udpConn.WriteToUDP(encoded, source)
 		if err != nil {
 			fmt.Println("Failed to send response:", err)
 		}
-
-		fmt.Println("written to udp")
 	}
 }
